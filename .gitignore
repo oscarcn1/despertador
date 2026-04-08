@@ -1,0 +1,27 @@
+# Binary
+despertador
+
+# Config (generado automaticamente)
+config.json
+
+# Music files
+music/*.mp3
+
+# Go
+*.exe
+*.test
+*.out
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/

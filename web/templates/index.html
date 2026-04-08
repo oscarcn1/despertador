@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Despertador</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Despertador</h1>
+            <p id="current-time"></p>
+        </div>
+
+        <!-- Ringing Banner -->
+        <div class="alarm-banner" id="alarm-banner">
+            <h2>Alarma sonando</h2>
+            <p><span id="ring-name"></span> &mdash; desde las <span id="ring-since"></span></p>
+            <button class="btn-dismiss" onclick="dismiss()">Apagar alarma</button>
+        </div>
+
+        <!-- Alarm List -->
+        <div id="alarms-list"></div>
+
+        <!-- Add Alarm Button -->
+        <button class="btn btn-add" onclick="openEditor(null)">+ Nueva alarma</button>
+    </div>
+
+    <!-- Modal Editor -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeEditor()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2 id="modal-title">Nueva alarma</h2>
+                <button class="modal-close" onclick="closeEditor()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <label class="field-label">Nombre</label>
+                <input type="text" id="ed-name" class="text-input" placeholder="Mi alarma">
+
+                <label class="field-label">Hora</label>
+                <div class="time-input-group">
+                    <input type="number" id="ed-hour" class="time-input" min="1" max="12" value="7">
+                    <span class="time-separator">:</span>
+                    <input type="number" id="ed-minute" class="time-input" min="0" max="59" value="00">
+                    <div class="period-toggle">
+                        <button class="period-btn active" data-period="AM" onclick="setPeriod('AM')">AM</button>
+                        <button class="period-btn" data-period="PM" onclick="setPeriod('PM')">PM</button>
+                    </div>
+                </div>
+
+                <label class="field-label">Dias</label>
+                <div class="days-grid">
+                    <button class="day-btn" data-day="1">LUN</button>
+                    <button class="day-btn" data-day="2">MAR</button>
+                    <button class="day-btn" data-day="3">MIE</button>
+                    <button class="day-btn" data-day="4">JUE</button>
+                    <button class="day-btn" data-day="5">VIE</button>
+                    <button class="day-btn" data-day="6">SAB</button>
+                    <button class="day-btn" data-day="0">DOM</button>
+                </div>
+
+                <label class="field-label">Volumen</label>
+                <div class="volume-row">
+                    <span class="volume-label">&#128264;</span>
+                    <input type="range" id="ed-volume" min="0" max="100" value="80">
+                    <span class="volume-value" id="ed-volume-value">80%</span>
+                </div>
+
+                <label class="field-label">Directorio de musica</label>
+                <div class="music-dir-row">
+                    <input type="text" id="ed-music-dir" class="text-input" value="/home/oscar/Projects/despertador/music">
+                    <button class="btn btn-small" onclick="refreshFiles()">Buscar</button>
+                </div>
+
+                <label class="field-label">Orden de reproduccion</label>
+                <div class="order-group">
+                    <button class="order-btn active" data-order="random" onclick="setOrder('random')">Aleatorio</button>
+                    <button class="order-btn" data-order="sequential" onclick="setOrder('sequential')">Secuencial</button>
+                    <button class="order-btn" data-order="single" onclick="setOrder('single')">Archivo unico</button>
+                </div>
+
+                <!-- File list -->
+                <div id="file-list-container">
+                    <label class="field-label">Archivos MP3 <span id="ed-file-count" class="file-count"></span></label>
+                    <div class="file-list" id="ed-file-list"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeEditor()">Cancelar</button>
+                <button class="btn btn-primary" onclick="saveAlarm()">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let editingId = null;
+        let currentPeriod = 'AM';
+        let currentOrder = 'random';
+        let currentSelectedFile = '';
+        let fileListCache = [];
+
+        const $ = id => document.getElementById(id);
+
+        // Clock
+        function updateClock() {
+            const now = new Date();
+            const days = ['Domingo','Lunes','Martes','Miercoles','Jueves','Viernes','Sabado'];
+            const h = now.getHours();
+            const m = now.getMinutes();
+            const period = h >= 12 ? 'PM' : 'AM';
+            const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+            $('current-time').textContent = `${days[now.getDay()]} ${h12}:${String(m).padStart(2,'0')} ${period}`;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        function showToast(msg) {
+            const t = $('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2500);
+        }
+
+        function daysLabel(days) {
+            if (!days || days.length === 0) return 'Sin dias';
+            const names = {1:'Lun',2:'Mar',3:'Mie',4:'Jue',5:'Vie',6:'Sab',0:'Dom'};
+            const weekdays = [1,2,3,4,5];
+            const weekend = [6,0];
+            const sorted = [...days].sort((a,b) => (a===0?7:a) - (b===0?7:b));
+            if (sorted.length === 7) return 'Todos los dias';
+            if (sorted.length === 5 && weekdays.every(d => days.includes(d))) return 'Lun - Vie';
+            if (sorted.length === 2 && weekend.every(d => days.includes(d))) return 'Fin de semana';
+            return sorted.map(d => names[d]).join(', ');
+        }
+
+        function orderLabel(order) {
+            return {random:'Aleatorio', sequential:'Secuencial', single:'Archivo unico'}[order] || order;
+        }
+
+        // Render alarm cards
+        function renderAlarms(alarms) {
+            const list = $('alarms-list');
+            if (!alarms || alarms.length === 0) {
+                list.innerHTML = '<div class="empty-state">No hay alarmas configuradas</div>';
+                return;
+            }
+
+            list.innerHTML = alarms.map(a => `
+                <div class="card alarm-card ${a.enabled ? '' : 'disabled'}">
+                    <div class="alarm-card-header">
+                        <div class="alarm-card-info">
+                            <div class="alarm-card-time">${a.hour}:${String(a.minute).padStart(2,'0')} <span class="alarm-period">${a.period}</span></div>
+                            <div class="alarm-card-name">${a.name}</div>
+                            <div class="alarm-card-meta">${daysLabel(a.days)} &middot; ${orderLabel(a.play_order)}</div>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="toggleAlarm('${a.id}', this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="alarm-card-actions">
+                        <button class="btn-icon" onclick="testAlarm('${a.id}')" title="Probar">&#9654;</button>
+                        <button class="btn-icon" onclick="openEditor('${a.id}')" title="Editar">&#9998;</button>
+                        <button class="btn-icon btn-icon-danger" onclick="deleteAlarm('${a.id}')" title="Eliminar">&#128465;</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Load status
+        let alarmsData = [];
+        async function loadStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                alarmsData = data.alarms || [];
+                renderAlarms(alarmsData);
+
+                const banner = $('alarm-banner');
+                if (data.ringing && data.ringing_info) {
+                    banner.classList.add('active');
+                    $('ring-name').textContent = data.ringing_info.alarm_name;
+                    $('ring-since').textContent = data.ringing_info.since;
+                } else {
+                    banner.classList.remove('active');
+                }
+            } catch (e) {
+                console.error('Error loading status:', e);
+            }
+        }
+
+        // Toggle alarm enabled
+        async function toggleAlarm(id, enabled) {
+            const alarm = alarmsData.find(a => a.id === id);
+            if (!alarm) return;
+            alarm.enabled = enabled;
+            try {
+                await fetch(`/api/alarms/${id}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(alarm)
+                });
+                showToast(enabled ? 'Alarma activada' : 'Alarma desactivada');
+            } catch(e) {
+                showToast('Error');
+            }
+        }
+
+        // Delete alarm
+        async function deleteAlarm(id) {
+            if (!confirm('Eliminar esta alarma?')) return;
+            try {
+                await fetch(`/api/alarms/${id}`, {method: 'DELETE'});
+                showToast('Alarma eliminada');
+                loadStatus();
+            } catch(e) {
+                showToast('Error al eliminar');
+            }
+        }
+
+        // Test alarm
+        async function testAlarm(id) {
+            try {
+                const res = await fetch(`/api/test/${id}`, {method: 'POST'});
+                if (res.ok) showToast('Probando alarma...');
+                else showToast('Error al probar');
+            } catch(e) {
+                showToast('Error');
+            }
+        }
+
+        // Dismiss
+        async function dismiss() {
+            try {
+                await fetch('/api/dismiss', {method: 'POST'});
+                $('alarm-banner').classList.remove('active');
+                showToast('Alarma apagada');
+            } catch(e) {
+                showToast('Error');
+            }
+        }
+
+        // Editor
+        function setPeriod(p) {
+            currentPeriod = p;
+            document.querySelectorAll('.period-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.period === p);
+            });
+        }
+
+        function setOrder(o) {
+            currentOrder = o;
+            document.querySelectorAll('.order-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.order === o);
+            });
+            renderFileList();
+        }
+
+        async function refreshFiles() {
+            const dir = $('ed-music-dir').value;
+            try {
+                const res = await fetch(`/api/music-files?dir=${encodeURIComponent(dir)}`);
+                fileListCache = await res.json();
+                $('ed-file-count').textContent = `(${fileListCache.length})`;
+                renderFileList();
+            } catch(e) {
+                $('ed-file-count').textContent = '(error)';
+                fileListCache = [];
+                renderFileList();
+            }
+        }
+
+        function renderFileList() {
+            const container = $('ed-file-list');
+            if (fileListCache.length === 0) {
+                container.innerHTML = '<div class="file-empty">No se encontraron archivos MP3</div>';
+                return;
+            }
+
+            const isSelectable = currentOrder === 'single';
+            container.innerHTML = fileListCache.map((f, i) => {
+                const name = f.split('/').pop();
+                const selected = isSelectable && f === currentSelectedFile;
+                return `<div class="file-item ${selected ? 'selected' : ''} ${isSelectable ? 'selectable' : ''}"
+                    ${isSelectable ? `onclick="selectFile('${f.replace(/'/g, "\\'")}')"` : ''}>
+                    <span class="file-index">${i + 1}</span>
+                    <span class="file-name">${name}</span>
+                    ${selected ? '<span class="file-check">&#10003;</span>' : ''}
+                </div>`;
+            }).join('');
+        }
+
+        function selectFile(f) {
+            currentSelectedFile = f;
+            renderFileList();
+        }
+
+        function openEditor(id) {
+            editingId = id;
+            const modal = $('modal-overlay');
+
+            if (id) {
+                const alarm = alarmsData.find(a => a.id === id);
+                if (!alarm) return;
+                $('modal-title').textContent = 'Editar alarma';
+                $('ed-name').value = alarm.name;
+                $('ed-hour').value = alarm.hour;
+                $('ed-minute').value = String(alarm.minute).padStart(2, '0');
+                setPeriod(alarm.period);
+                $('ed-volume').value = alarm.volume;
+                $('ed-volume-value').textContent = alarm.volume + '%';
+                $('ed-music-dir').value = alarm.music_dir;
+                currentOrder = alarm.play_order;
+                currentSelectedFile = alarm.selected_file || '';
+
+                document.querySelectorAll('.modal .day-btn').forEach(btn => {
+                    btn.classList.toggle('active', alarm.days.includes(parseInt(btn.dataset.day)));
+                });
+                document.querySelectorAll('.order-btn').forEach(b => {
+                    b.classList.toggle('active', b.dataset.order === currentOrder);
+                });
+            } else {
+                $('modal-title').textContent = 'Nueva alarma';
+                $('ed-name').value = '';
+                $('ed-hour').value = 7;
+                $('ed-minute').value = '00';
+                setPeriod('AM');
+                $('ed-volume').value = 80;
+                $('ed-volume-value').textContent = '80%';
+                $('ed-music-dir').value = '/home/oscar/Projects/despertador/music';
+                currentOrder = 'random';
+                currentSelectedFile = '';
+
+                document.querySelectorAll('.modal .day-btn').forEach(btn => {
+                    const d = parseInt(btn.dataset.day);
+                    btn.classList.toggle('active', d >= 1 && d <= 5);
+                });
+                document.querySelectorAll('.order-btn').forEach(b => {
+                    b.classList.toggle('active', b.dataset.order === 'random');
+                });
+            }
+
+            modal.classList.add('active');
+            refreshFiles();
+        }
+
+        function closeEditor() {
+            $('modal-overlay').classList.remove('active');
+            editingId = null;
+        }
+
+        async function saveAlarm() {
+            const days = [];
+            document.querySelectorAll('.modal .day-btn.active').forEach(btn => {
+                days.push(parseInt(btn.dataset.day));
+            });
+
+            const name = $('ed-name').value.trim() || 'Alarma';
+            const body = {
+                name: name,
+                enabled: true,
+                hour: parseInt($('ed-hour').value),
+                minute: parseInt($('ed-minute').value),
+                period: currentPeriod,
+                days: days,
+                music_dir: $('ed-music-dir').value,
+                volume: parseInt($('ed-volume').value),
+                play_order: currentOrder,
+                selected_file: currentOrder === 'single' ? currentSelectedFile : ''
+            };
+
+            // If editing, preserve enabled state
+            if (editingId) {
+                const existing = alarmsData.find(a => a.id === editingId);
+                if (existing) body.enabled = existing.enabled;
+            }
+
+            try {
+                let res;
+                if (editingId) {
+                    res = await fetch(`/api/alarms/${editingId}`, {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(body)
+                    });
+                } else {
+                    res = await fetch('/api/alarms', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(body)
+                    });
+                }
+                if (res.ok) {
+                    showToast(editingId ? 'Alarma actualizada' : 'Alarma creada');
+                    closeEditor();
+                    loadStatus();
+                } else {
+                    const text = await res.text();
+                    showToast('Error: ' + text);
+                }
+            } catch(e) {
+                showToast('Error de conexion');
+            }
+        }
+
+        // Volume slider in editor
+        $('ed-volume').addEventListener('input', e => {
+            $('ed-volume-value').textContent = e.target.value + '%';
+        });
+
+        // Day buttons in modal
+        document.querySelectorAll('.modal .day-btn').forEach(btn => {
+            btn.addEventListener('click', () => btn.classList.toggle('active'));
+        });
+
+        // Poll
+        loadStatus();
+        setInterval(loadStatus, 5000);
+    </script>
+</body>
+</html>

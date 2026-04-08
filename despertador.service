@@ -1,0 +1,14 @@
+[Unit]
+Description=Despertador - Alarm Clock Service
+After=network.target sound.target
+
+[Service]
+Type=simple
+User=oscar
+WorkingDirectory=/home/oscar/Projects/despertador
+ExecStart=/home/oscar/Projects/despertador/despertador --port 8080
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
